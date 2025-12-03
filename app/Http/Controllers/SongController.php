@@ -2,181 +2,175 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Song;
+use App\Services\AudioService;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\View\View;
 
 class SongController extends Controller
 {
-    /* ===========================
-     *  FORM UPLOAD
-     * =========================== */
-    public function uploadForm()
-    {
-        $genres = config('genres'); // ambil list genre
-        return view('upload', compact('genres'));
+    public function __construct(
+        private readonly AudioService $audioService
+    ) {
     }
 
-
-    /* ===========================
-     *  UPLOAD LAGU BARU
-     * =========================== */
-    public function upload(Request $request)
+    public function uploadForm(): View
     {
-        $request->validate([
-            'title'    => 'required',
-            'artist'   => 'required',
-            'category' => 'required',
-            'file'     => 'required|mimes:mp3|max:20000',
-            'cover'    => 'nullable|image|mimes:jpg,jpeg,png|max:2048'
-        ]);
-
-        // Pastikan folder ada
-        if (!file_exists(public_path('songs'))) {
-            mkdir(public_path('songs'), 0777, true);
-        }
-        if (!file_exists(public_path('covers'))) {
-            mkdir(public_path('covers'), 0777, true);
-        }
-
-        // FILE MP3
-        $file = $request->file('file');
-        $fileName = uniqid() . '_' . $file->getClientOriginalName();
-        $file->move(public_path('songs'), $fileName);
-
-        // COVER (opsional)
-        $coverName = null;
-        if ($request->hasFile('cover')) {
-            $cover = $request->file('cover');
-            $coverName = uniqid() . '_cover_' . $cover->getClientOriginalName();
-            $cover->move(public_path('covers'), $coverName);
-        }
-
-        // SIMPAN DATABASE
-        Song::create([
-            'title'     => $request->title,
-            'artist'    => $request->artist,
-            'category'  => $request->category,
-            'file_path' => 'songs/' . $fileName,
-            'cover'     => $coverName ? 'covers/' . $coverName : null,
-            'uploader'  => 'User'
-        ]);
-
-        return redirect('/library');
-    }
-
-
-    /* ===========================
-     *  HALAMAN EDIT
-     * =========================== */
-    public function edit($id)
-    {
-        $song = Song::findOrFail($id);
         $genres = config('genres');
 
-        return view('edit', compact('song', 'genres'));
+        return view('pages.upload', compact('genres'));
     }
 
-
-    /* ===========================
-     *  UPDATE LAGU
-     * =========================== */
-    public function update(Request $request, $id)
+    public function upload(Request $request): RedirectResponse
     {
-        $song = Song::findOrFail($id);
-
-        $request->validate([
-            'title'    => 'required',
-            'artist'   => 'required',
-            'category' => 'required',
-            'file'     => 'nullable|mimes:mp3|max:20000',
-            'cover'    => 'nullable|image|mimes:jpg,jpeg,png|max:2048'
+        $validated = $request->validate([
+            'title' => ['required', 'string'],
+            'artist' => ['required', 'string'],
+            'category' => ['required', 'string'],
+            'file' => ['required', 'mimes:mp3', 'max:20000'],
+            'cover' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
         ]);
 
-        // UPDATE COVER
-        if ($request->hasFile('cover')) {
-            $cover = $request->file('cover');
-            $coverName = uniqid() . '_cover_' . $cover->getClientOriginalName();
-            $cover->move(public_path('covers'), $coverName);
-            $song->cover = 'covers/' . $coverName;
-        }
+        $filePath = $this->audioService->storeSongFile($request->file('file'));
+        $coverPath = $this->audioService->storeCoverFile($request->file('cover'));
 
-        // UPDATE FILE MP3
-        if ($request->hasFile('file')) {
-            $file = $request->file('file');
-            $fileName = uniqid() . '_' . $file->getClientOriginalName();
-            $file->move(public_path('songs'), $fileName);
-            $song->file_path = 'songs/' . $fileName;
-        }
+        Song::create([
+            'title' => $validated['title'],
+            'artist' => $validated['artist'],
+            'category' => $validated['category'],
+            'file_path' => $filePath,
+            'cover' => $coverPath,
+            'uploader' => 'User',
+        ]);
 
-        // UPDATE FIELD
-        $song->title    = $request->title;
-        $song->artist   = $request->artist;
-        $song->category = $request->category;
-        $song->save();
-
-        return redirect('/library')->with('success', 'Lagu berhasil diupdate!');
+        return redirect()->route('library');
     }
 
-
-    /* ===========================
-     *  DELETE LAGU
-     * =========================== */
-    public function destroy($id)
+    public function edit(Song $song): View
     {
-        $song = Song::findOrFail($id);
+        $genres = config('genres');
+
+        return view('pages.edit', compact('song', 'genres'));
+    }
+
+    public function update(Request $request, Song $song): RedirectResponse
+    {
+        $validated = $request->validate([
+            'title' => ['required', 'string'],
+            'artist' => ['required', 'string'],
+            'category' => ['required', 'string'],
+            'file' => ['nullable', 'mimes:mp3', 'max:20000'],
+            'cover' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
+        ]);
+
+        if ($request->hasFile('cover')) {
+            $song->cover = $this->audioService->storeCoverFile($request->file('cover'));
+        }
+
+        if ($request->hasFile('file')) {
+            $song->file_path = $this->audioService->storeSongFile($request->file('file'));
+        }
+
+        $song->fill([
+            'title' => $validated['title'],
+            'artist' => $validated['artist'],
+            'category' => $validated['category'],
+        ])->save();
+
+        return redirect()
+            ->route('library')
+            ->with('success', 'Lagu berhasil diupdate!');
+    }
+
+    public function destroy(Song $song): RedirectResponse
+    {
         $song->delete();
 
-        return redirect('/library')->with('success', 'Lagu berhasil dihapus!');
+        return redirect()
+            ->route('library')
+            ->with('success', 'Lagu berhasil dihapus!');
     }
 
+    public function playMeta(Request $request, Song $song)
+    {
+        $payload = [
+            'id' => $song->id,
+            'title' => $song->title,
+            'artist' => $song->artist,
+            'category' => $song->category,
+            'src' => asset($song->file_path),
+            'cover' => $song->cover ? asset($song->cover) : null,
+        ];
 
-    /* ===========================
-     *  LIBRARY
-     * =========================== */
-    public function library()
+        if ($request->wantsJson() || $request->header('Accept') === 'application/json') {
+            return response()->json($payload);
+        }
+
+        return redirect()->route('library');
+    }
+
+    public function library(): View
     {
         $songs = Song::latest()->get();
-        return view('library', compact('songs'));
+
+        if (request()->wantsJson()) {
+            return response()->json([
+                'songs' => $songs,
+            ]);
+        }
+
+        return view('pages.library', compact('songs'));
     }
 
-
-    /* ===========================
-     *  HOME (Listen Again + Recommended)
-     * =========================== */
-    public function home()
+    public function home(): View
     {
-        // listen again (10 terbaru)
         $latest = Song::latest()->take(10)->get();
 
-        // kategori terbanyak
         $topCategory = Song::select('category')
             ->groupBy('category')
             ->orderByRaw('COUNT(*) DESC')
-            ->limit(1)
             ->value('category');
 
-        // rekomendasi
-        $recommended = Song::where('category', $topCategory)
-                            ->inRandomOrder()
-                            ->take(10)
-                            ->get();
+        $recommended = $topCategory
+            ? Song::where('category', $topCategory)
+                ->latest()
+                ->take(10)
+                ->get()
+            : collect();
 
-        return view('home', compact('latest', 'recommended', 'topCategory'));
+        if (request()->wantsJson()) {
+            return response()->json([
+                'latest' => $latest,
+                'recommended' => $recommended,
+                'topCategory' => $topCategory,
+            ]);
+        }
+
+        return view('pages.home', compact('latest', 'recommended', 'topCategory'));
     }
 
-
-    /* ===========================
-     *  SEARCH
-     * =========================== */
-    public function search(Request $request)
+    public function search(Request $request): View
     {
-        $q = $request->q;
+        $query = $request->string('q')->toString();
 
-        $songs = Song::where('title', 'LIKE', "%$q%")
-                    ->orWhere('artist', 'LIKE', "%$q%")
-                    ->orWhere('category', 'LIKE', "%$q%")
-                    ->get();
+        $songs = Song::query()
+            ->when($query, function ($builder) use ($query) {
+                $builder
+                    ->where('title', 'like', "%{$query}%")
+                    ->orWhere('artist', 'like', "%{$query}%")
+                    ->orWhere('category', 'like', "%{$query}%");
+            })
+            ->latest()
+            ->get();
 
-        return view('library', compact('songs'));
+        if ($request->wantsJson()) {
+            return response()->json([
+                'songs' => $songs,
+                'query' => $query,
+            ]);
+        }
+
+        return view('pages.library', compact('songs', 'query'));
     }
 }
