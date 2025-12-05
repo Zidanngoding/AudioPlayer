@@ -22,6 +22,12 @@
     let status = 'paused';
     let lastSavedSecond = 0;
 
+    const saveCurrentPosition = () => {
+        if (!queue[currentIndex]) return;
+        positions[trackKey(queue[currentIndex])] = audio.currentTime || 0;
+        persistState();
+    };
+
     const storage = {
         queue: 'cloud_player_queue',
         index: 'cloud_player_index',
@@ -105,7 +111,8 @@
         if (!queue.length) return;
         currentIndex = (index + queue.length) % queue.length;
         status = 'playing';
-        loadTrack(queue[currentIndex], { autoplay: true, resume: true });
+        // Next/prev harus mulai dari awal, jadi jangan resume posisi sebelumnya
+        loadTrack(queue[currentIndex], { autoplay: true, resume: false, startAt: 0 });
         persistState();
     };
 
@@ -123,6 +130,7 @@
     };
 
     const handlePlayClick = (button) => {
+        saveCurrentPosition();
         const container = button.closest('[data-tracklist]');
         if (container) {
             queue = buildQueueFromContainer(container);
@@ -179,10 +187,12 @@
             }
 
             if (action === 'next') {
+                saveCurrentPosition();
                 playAtIndex(currentIndex + 1);
             }
 
             if (action === 'prev') {
+                saveCurrentPosition();
                 playAtIndex(currentIndex - 1);
             }
         });
@@ -197,8 +207,7 @@
     });
 
     seekEl.addEventListener('change', () => {
-        positions[trackKey(queue[currentIndex] || {})] = audio.currentTime;
-        persistState();
+        saveCurrentPosition();
     });
 
     volumeEl.addEventListener('input', (event) => {

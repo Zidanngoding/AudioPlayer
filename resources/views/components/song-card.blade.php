@@ -1,12 +1,13 @@
 @props(['song'])
 
 @php
-    $cover = $song->cover ? asset($song->cover) : '';
+    $fileUrl = $song->file_url ?? ($song->file_path ? asset($song->file_path) : '');
+    $cover = $song->cover_url ?? ($song->cover ? asset($song->cover) : asset('defaultcover.jpg'));
 @endphp
 
 <button type="button"
         class="w-40 text-left space-y-2 group js-play"
-        data-src="{{ asset($song->file_path) }}"
+        data-src="{{ $fileUrl }}"
         data-title="{{ $song->title }}"
         data-artist="{{ $song->artist }}"
         data-cover="{{ $cover }}"

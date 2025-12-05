@@ -6,6 +6,7 @@ use App\Models\Song;
 use App\Services\AudioService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\View\View;
 
 class SongController extends Controller
@@ -50,6 +51,7 @@ class SongController extends Controller
     public function edit(Song $song): View
     {
         $genres = config('genres');
+        $this->hydrateSong($song);
 
         return view('pages.edit', compact('song', 'genres'));
     }
@@ -65,11 +67,15 @@ class SongController extends Controller
         ]);
 
         if ($request->hasFile('cover')) {
-            $song->cover = $this->audioService->storeCoverFile($request->file('cover'));
+            $newCover = $this->audioService->storeCoverFile($request->file('cover'));
+            $this->audioService->deletePath($song->cover);
+            $song->cover = $newCover;
         }
 
         if ($request->hasFile('file')) {
-            $song->file_path = $this->audioService->storeSongFile($request->file('file'));
+            $newSongPath = $this->audioService->storeSongFile($request->file('file'));
+            $this->audioService->deletePath($song->file_path);
+            $song->file_path = $newSongPath;
         }
 
         $song->fill([
@@ -85,6 +91,8 @@ class SongController extends Controller
 
     public function destroy(Song $song): RedirectResponse
     {
+        $this->audioService->deletePath($song->file_path);
+        $this->audioService->deletePath($song->cover);
         $song->delete();
 
         return redirect()
@@ -92,32 +100,12 @@ class SongController extends Controller
             ->with('success', 'Lagu berhasil dihapus!');
     }
 
-    public function playMeta(Request $request, Song $song)
-    {
-        $payload = [
-            'id' => $song->id,
-            'title' => $song->title,
-            'artist' => $song->artist,
-            'category' => $song->category,
-            'src' => asset($song->file_path),
-            'cover' => $song->cover ? asset($song->cover) : null,
-        ];
-
-        if ($request->wantsJson() || $request->header('Accept') === 'application/json') {
-            return response()->json($payload);
-        }
-
-        return redirect()->route('library');
-    }
-
     public function library(): View
     {
-        $songs = Song::latest()->get();
+        $songs = $this->hydrateSongs(Song::latest()->get());
 
         if (request()->wantsJson()) {
-            return response()->json([
-                'songs' => $songs,
-            ]);
+            return response()->json(['songs' => $songs]);
         }
 
         return view('pages.library', compact('songs'));
@@ -125,19 +113,18 @@ class SongController extends Controller
 
     public function home(): View
     {
-        $latest = Song::latest()->take(10)->get();
+        $latest = $this->hydrateSongs(Song::latest()->take(10)->get());
 
         $topCategory = Song::select('category')
             ->groupBy('category')
             ->orderByRaw('COUNT(*) DESC')
             ->value('category');
 
-        $recommended = $topCategory
-            ? Song::where('category', $topCategory)
-                ->latest()
-                ->take(10)
-                ->get()
+        $recommendedRaw = $topCategory
+            ? Song::where('category', $topCategory)->latest()->take(10)->get()
             : collect();
+
+        $recommended = $this->hydrateSongs($recommendedRaw);
 
         if (request()->wantsJson()) {
             return response()->json([
@@ -164,6 +151,8 @@ class SongController extends Controller
             ->latest()
             ->get();
 
+        $songs = $this->hydrateSongs($songs);
+
         if ($request->wantsJson()) {
             return response()->json([
                 'songs' => $songs,
@@ -172,5 +161,42 @@ class SongController extends Controller
         }
 
         return view('pages.library', compact('songs', 'query'));
+    }
+
+    public function playMeta(Request $request, Song $song)
+    {
+        $payload = $this->playPayload($song);
+
+        if ($request->wantsJson() || $request->header('Accept') === 'application/json') {
+            return response()->json($payload);
+        }
+
+        return redirect()->route('library');
+    }
+
+    private function hydrateSongs(Collection $songs): Collection
+    {
+        return $songs->map(fn (Song $song) => $this->hydrateSong($song));
+    }
+
+    private function hydrateSong(Song $song): Song
+    {
+        // Keep stored paths intact; expose URLs separately
+        $song->file_url = $this->audioService->url($song->file_path);
+        $song->cover_url = $this->audioService->url($song->cover);
+
+        return $song;
+    }
+
+    private function playPayload(Song $song): array
+    {
+        return [
+            'id' => $song->id,
+            'title' => $song->title,
+            'artist' => $song->artist,
+            'category' => $song->category,
+            'src' => $this->audioService->url($song->file_path),
+            'cover' => $this->audioService->url($song->cover),
+        ];
     }
 }

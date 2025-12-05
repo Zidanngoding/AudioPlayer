@@ -22,13 +22,14 @@
     <div class="space-y-4" data-tracklist="playlist-list">
         @forelse ($songs as $song)
             @php
-                $cover = $song->cover ? asset($song->cover) : '';
+                $fileUrl = $song->file_url ?? ($song->file_path ? asset($song->file_path) : '');
+                $cover = $song->cover_url ?? ($song->cover ? asset($song->cover) : asset('defaultcover.jpg'));
             @endphp
             <div class="p-4 bg-neutral-900/60 border border-neutral-800 rounded-lg flex items-center justify-between gap-4">
                 <div class="flex items-center gap-4">
                     <button type="button"
                             class="w-16 h-16 rounded-lg overflow-hidden bg-neutral-800 js-play"
-                            data-src="{{ asset($song->file_path) }}"
+                            data-src="{{ $fileUrl }}"
                             data-title="{{ $song->title }}"
                             data-artist="{{ $song->artist }}"
                             data-cover="{{ $cover }}"
